@@ -47,4 +47,4 @@ Resources:
                 Action:
                   - sts:AssumeRole
                 Resource: 
-                  - arn:aws:iam::*:role/OrganizationAccountAccessRole"                      
+                  - arn:aws:iam::*:role/OrganizationAccountAccessRole                   

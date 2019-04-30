@@ -1,0 +1,242 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Create S3 bucket and KMS in Log Account. This Cloudforamation must need to execute in log account'      
+Parameters:
+  MasterAccountNo:
+    Description: 'Master AWS Account No'
+    Type: Number
+    MinValue: 000000000001
+    MaxValue: 999999999999
+    ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901" 
+Resources:
+#---------------------------------------
+#CloudTrail & Cloudwatch Configuration
+#---------------------------------------
+  myKMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: This will used by cloudtrail to store logs in s3 with encryption
+      Enabled: true
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: Key policy created by CloudTrail
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Join 
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'MasterAccountNo'
+                  - ':root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Join 
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':root'
+            Action: 'kms:*'
+            Resource: '*'            
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+                Service: cloudtrail.amazonaws.com
+            Action: kms:*
+            Resource: "*"
+      Tags:
+        - Key: Name
+          Value: CloudTrail-Log-Encryptions
+  myKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+        AliasName: alias/Trail-Log-Encryption
+        TargetKeyId:
+            Ref: myKMSKey
+  LoggingBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+        BucketName: !Sub "s3access-logs12-${MasterAccountNo}"
+        AccessControl: LogDeliveryWrite
+        LifecycleConfiguration:
+            Rules:
+            - Id: Transition90daysRetain7yrs
+              Status: Enabled
+              ExpirationInDays: 2555
+              Transition:
+                TransitionInDays: 90
+                StorageClass: STANDARD_IA
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        VersioningConfiguration:
+            Status: Enabled
+        PublicAccessBlockConfiguration:
+            BlockPublicAcls: true
+            BlockPublicPolicy: true
+            IgnorePublicAcls: true
+            RestrictPublicBuckets: true
+  LoggingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    DependsOn: LoggingBucket
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Statement:
+        - Sid: Enforce HTTPS Connections
+          Action: s3:*
+          Effect: Deny
+          Principal: '*'
+          Resource: !Sub "arn:aws:s3:::${LoggingBucket}/*"
+          Condition:
+            Bool:
+              aws:SecureTransport: false
+        - Sid: Restrict Delete* Actions
+          Action: s3:Delete*
+          Effect: Deny
+          Principal: '*'
+          Resource: !Sub "arn:aws:s3:::${LoggingBucket}/*"
+  TrailBucket:
+    DependsOn:
+    - LoggingBucket
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+        BucketName: !Sub "cloudtrail-bucket12-${MasterAccountNo}"
+        AccessControl: Private
+        VersioningConfiguration:
+            Status: Enabled        
+        LoggingConfiguration:
+            DestinationBucketName: !Ref LoggingBucket
+            LogFilePrefix: !Sub "cloudtrail-bucket-${MasterAccountNo}"
+        PublicAccessBlockConfiguration:
+            BlockPublicAcls: true
+            BlockPublicPolicy: true
+            IgnorePublicAcls: true
+            RestrictPublicBuckets: true 
+        BucketEncryption:
+            ServerSideEncryptionConfiguration:
+                - ServerSideEncryptionByDefault:
+                    SSEAlgorithm: AES256
+  TrailBucketPolicy:
+    DependsOn: TrailBucket
+    DeletionPolicy: Retain
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AWSCloudTrailAclCheck
+          Effect: Allow
+          Principal:
+            Service: 'cloudtrail.amazonaws.com'
+          Action: 's3:GetBucketAcl'
+          Resource: !Sub 'arn:aws:s3:::${TrailBucket}'
+        - Sid: AWSCloudTrailWrite
+          Effect: Allow
+          Principal:
+            Service: 'cloudtrail.amazonaws.com'
+          Action: 's3:PutObject'
+          Resource: !Sub 'arn:aws:s3:::${TrailBucket}/AWSLogs/*'
+          Condition:
+            StringEquals:
+              's3:x-amz-acl': 'bucket-owner-full-control'
+        - Sid: Enforce HTTPS Connections
+          Action: s3:*
+          Effect: Deny
+          Principal: '*'
+          Resource: !Sub "arn:aws:s3:::${TrailBucket}/*"
+          Condition:
+            Bool:
+              aws:SecureTransport: false
+        - Sid: Restrict Delete* Actions
+          Action: s3:Delete*
+          Effect: Deny
+          Principal: '*'
+          Resource: !Sub "arn:aws:s3:::${TrailBucket}/*"
+#----------------------------------------
+#ConfigService Configurations
+#----------------------------------------
+  ConfigBucket:
+    DependsOn: LoggingBucket
+    DeletionPolicy: Retain
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "config-bucket12-${MasterAccountNo}"
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled    
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: !Sub "config-bucket-${MasterAccountNo}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  ConfigBucketPolicy:
+    DependsOn: ConfigBucket
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    Properties:
+      Bucket: !Ref ConfigBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AWSConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource:
+              - !Sub "arn:aws:s3:::${ConfigBucket}"
+          - Sid: AWSConfigBucketDelivery
+            Effect: Allow
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              - !Sub "arn:aws:s3:::${ConfigBucket}/AWSLogs/*"
+          - Sid: Enforce HTTPS Connections
+            Action: s3:*
+            Effect: Deny
+            Principal: '*'
+            Resource: !Sub "arn:aws:s3:::${ConfigBucket}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: Restrict Delete* Actions
+            Action: s3:Delete*
+            Effect: Deny
+            Principal: '*'
+            Resource: !Sub "arn:aws:s3:::${ConfigBucket}/*"          
+Outputs:
+  ConfigS3BucketName: 
+    Description: "S3 Bucket Name for Config Service"
+    Value: !Ref ConfigBucket
+    Export: 
+      Name: !Sub "${AWS::StackName}-CONFIGBUCKETNAME"
+  TrailS3BucketName: 
+    Description: "S3 Bucket Name for CloudTrail Service"
+    Value: !Ref TrailBucket
+    Export: 
+      Name: !Sub "${AWS::StackName}-TRAILBUCKETNAME"
+  ConfigS3BucketName: 
+    Description: "S3 Bucket Name for S3Accesslogs"
+    Value: !Ref LoggingBucket
+    Export: 
+      Name: !Sub "${AWS::StackName}-S3ACCESSBUCKETNAME"

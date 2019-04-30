@@ -46,5 +46,4 @@ Resources:
                 Effect: "Allow"
                 Action:
                   - sts:AssumeRole
-                Resource: 
-                  - arn:aws:iam::*:role/OrganizationAccountAccessRole                   
+                Resource: *            

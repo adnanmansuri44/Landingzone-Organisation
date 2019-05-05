@@ -114,7 +114,7 @@ Conditions:
             Effect: Allow
             Action: s3:PutObject
             Resource:
-            - !Join ['', ['arn:aws:s3:::','config-bucket12-',!Ref 'MasterAccountNo']]
+            - !Join ['', ['arn:aws:s3:::','config-bucket12-',!Ref 'MasterAccountNo',/AWSLogs/*]]
             Condition:
               StringEquals:
                 s3:x-amz-acl: bucket-owner-full-control

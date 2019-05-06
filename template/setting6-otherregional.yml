@@ -1,17 +1,17 @@
 ---
 AWSTemplateFormatVersion: 2010-09-09
-Description: "This Cloudformation will enable config, cloudwatch events and Alarm in Master Account"
+Description: "This Cloudformation will enable config, cloudwatch events in other region."
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
     - Label:
-        default: 'Masterdetail'
+        default: 'AccountDetail'
       Parameters:
       - MasterAccountNo
     - Label:
         default: 'Cloudwatch'
       Parameters:
-      - CloudwatchLogGroupName
+      - Cloudwatchalertconfigure
       - PrimaryEmailCloudwatchalarm
       - SecondaryEmailCloudwatchalarm
     - Label:
@@ -22,10 +22,10 @@ Metadata:
     ParameterLabels:
       MasterAccountNo:
         default: Master Account No
-      CloudwatchLogGroupName:
-        default: Cloudtrail logs Group Name in Cloudwatch(Only for Master Account)
+      Cloudwatchalertconfigure:
+        default: Want to Configure Cloudwatch Alerts ? 
       PrimaryEmailCloudwatchalarm:
-        default: Primary Email Address for Cloudwatch Alerts(Required)
+        default: Primary Email Address for Cloudwatch Alerts(Required only if you want alert)
       SecondaryEmailCloudwatchalarm:
         default: Secondary Email Address for Cloudwatch Alerts
       DeliveryFrequency:
@@ -39,14 +39,13 @@ Parameters:
     MinValue: 000000000001
     MaxValue: 999999999999
     ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901"
-  CloudwatchLogGroupName:
-    Description: 'Name of Cloudwatch Log Group'
+  Cloudwatchalertconfigure:
     Type: String
-    Default: 'CloudTrail/DefaultLogGroup'
-    MinLength: '0'
-    MaxLength: '512'
-    AllowedPattern: "[\\w-/.]+"
-    ConstraintDescription: "Log group names in Master Account created by 3rd Cloudforamtion template"
+    Default: 'No'
+    Description: "Configures AWS Cloudwatch Events Rule regionally"
+    AllowedValues:
+    - 'Yes'
+    - 'No'
   PrimaryEmailCloudwatchalarm:
     Type: String
     AllowedPattern: ".+@.+"
@@ -74,11 +73,15 @@ Parameters:
     Default: 'example@example.com'
     Description: "'Optional' Enter the email address you want to notify  stream change and notifications. ' this can cause a high volume of email.'"
 Conditions:
-  mastoraccount: !Equals [!Ref MasterAccountNo, '!Sub ${AWS::AccountId}']
   SecondarySubcription: !Not [!Equals [!Ref SecondaryEmailCloudwatchalarm, 'example2@example.com']]
   ConfigSubcription: !Not [!Equals [!Ref PrimaryEmailConfigservice, 'example@example.com']]
+  Events: !Not [!Equals [!Ref Cloudwatchalertconfigure, 'No']]
+  eventsecondarysub: !And 
+    - !Condition SecondarySubcription
+    - !Condition Events   
 Resources:
   AlarmNotificationTopic:
+    Condition: Events
     Type: AWS::SNS::Topic
     Properties:
       DisplayName: !Sub "Notify Cloudwatch Alerts ${AWS::AccountId}"
@@ -88,40 +91,16 @@ Resources:
           Ref: PrimaryEmailCloudwatchalarm
         Protocol: email
   SecondaryNotificationsub:
-    Condition: SecondarySubcription
+    Condition: eventsecondarysub
     Type: AWS::SNS::Subscription
     Properties:
         Endpoint: !Ref SecondaryEmailCloudwatchalarm
         Protocol: email
         TopicArn: !Ref 'AlarmNotificationTopic'
-  RoleForCloudWatchEvents:
-    Type: AWS::IAM::Role
-    DependsOn: AlarmNotificationTopic
-    Properties:
-      RoleName: Lambda-CW-Events-SNS
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - lambda.amazonaws.com
-          Action:
-          - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-      - PolicyName: CIS-AllowSnsPublish
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action: sns:Publish
-            Resource: "*"
   FunctionToFormatCloudWatchEvent:
+    Condition: Events
     Type: AWS::Lambda::Function
     DependsOn:
-    - RoleForCloudWatchEvents
     - AlarmNotificationTopic
     Properties:
       FunctionName: FormatCloudWatchEvent
@@ -156,167 +135,20 @@ Resources:
       Description: Formats a given CloudWatch Event to be published to an SNS topic
       Handler: index.lambda_handler
       MemorySize: 1024
-      Role: !GetAtt RoleForCloudWatchEvents.Arn
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/Lambda-CW-Events-SNS"
       Runtime: python2.7
       Timeout: 5
   LambdaPermissionForCloudTrailCloudWatchEventRules:
+    Condition: Events
     Type: AWS::Lambda::Permission
     DependsOn:
     - FunctionToFormatCloudWatchEvent
     Properties:
       FunctionName: !GetAtt FunctionToFormatCloudWatchEvent.Arn
       Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-  ConsoleSignInFailuresMetricFilter:
-    Condition: mastoraccount
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName:
-        Ref: CloudwatchLogGroupName
-      FilterPattern: '{ ($.eventName = ConsoleLogin) && ($.errorMessage = "Failed authentication") }'
-      MetricTransformations:
-      - MetricNamespace: CloudTrailMetrics
-        MetricName: ConsoleSignInFailureCount
-        MetricValue: '1'
-  ConsoleSignInFailuresAlarm:
-    Condition: mastoraccount
-    DependsOn:
-    - ConsoleSignInFailuresMetricFilter
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: CloudTrailConsoleSignInFailures
-      AlarmDescription: Alarms when an unauthenticated API call is made to sign into the console.
-      AlarmActions:
-      - Ref: AlarmNotificationTopic
-      MetricName: ConsoleSignInFailureCount
-      Namespace: CloudTrailMetrics
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      EvaluationPeriods: '1'
-      Period: '60'
-      Statistic: Sum
-      Threshold: '3'
-      TreatMissingData: notBreaching
-  AuthorizationFailuresMetricFilter:
-    Condition: mastoraccount
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName:
-        Ref: CloudwatchLogGroupName
-      FilterPattern: '{ ($.errorCode = "*UnauthorizedOperation") || ($.errorCode = "AccessDenied*") }'
-      MetricTransformations:
-      - MetricNamespace: CloudTrailMetrics
-        MetricName: AuthorizationFailureCount
-        MetricValue: '1'
-  AuthorizationFailuresAlarm:
-    Condition: mastoraccount
-    DependsOn:
-    - AuthorizationFailuresMetricFilter
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: CloudTrailAuthorizationFailures
-      AlarmDescription: Alarms when an unauthorized API call is made.
-      AlarmActions:
-      - Ref: AlarmNotificationTopic
-      MetricName: AuthorizationFailureCount
-      Namespace: CloudTrailMetrics
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      EvaluationPeriods: '1'
-      Period: '60'
-      TreatMissingData: notBreaching
-      Statistic: Sum
-      Threshold: '1'
-  ConsoleSignInWithoutMfaMetricFilter:
-    Condition: mastoraccount
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName:
-        Ref: CloudwatchLogGroupName
-      FilterPattern: '{ $.eventName = "ConsoleLogin" && $.additionalEventData.MFAUsed = "No" }'
-      MetricTransformations:
-      - MetricNamespace: CloudTrailMetrics
-        MetricName: ConsoleSignInWithoutMfaEventCount
-        MetricValue: '1'
-  ConsoleSignInWithoutMFAAlarm:
-    Condition: mastoraccount
-    DependsOn:
-    - ConsoleSignInWithoutMfaMetricFilter
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: ConsoleSignInWithoutMFA
-      AlarmDescription: Alarm for Management Console Sign-in without MFA.
-      AlarmActions:
-      - Ref: AlarmNotificationTopic
-      MetricName: ConsoleSignInWithoutMfaEventCount
-      Namespace: CloudTrailMetrics
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      EvaluationPeriods: '1'
-      Period: '60'
-      Statistic: Sum
-      Threshold: '1'
-      TreatMissingData: notBreaching      
-  RootuserIdentityusageMetricFilter:
-    Condition: mastoraccount
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName:
-        Ref: CloudwatchLogGroupName
-      FilterPattern: '{ $.userIdentity.type = "Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != "AwsServiceEvent" }'
-      MetricTransformations:
-      - MetricNamespace: CloudTrailMetrics
-        MetricName: RootAccountUsageEventCount
-        MetricValue: '1'
-  RootAccountUsageAlarm:
-    Condition: mastoraccount
-    DependsOn:
-    - RootuserIdentityusageMetricFilter
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: RootAccountUsage
-      AlarmDescription: Alarm for Usage of "root" Account.
-      AlarmActions:
-      - Ref: AlarmNotificationTopic
-      MetricName: RootAccountUsageEventCount
-      Namespace: CloudTrailMetrics
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      EvaluationPeriods: '1'
-      Period: '60'
-      Statistic: Sum
-      Threshold: '1'
-      TreatMissingData: notBreaching
-  IamPolicyChangesCloudWatchEventRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: IAMPolicychange
-      Description: Publishes formatted IAM policy change events to an SNS topic
-      EventPattern:
-        detail-type:
-        - AWS API Call via CloudTrail
-        detail:
-          eventSource:
-          - iam.amazonaws.com
-          eventName:
-            - AttachGroupPolicy
-            - AttachRolePolicy
-            - AttachUserPolicy
-            - CreateAccessKey
-            - CreatePolicy
-            - CreatePolicyVersion
-            - DeleteAccessKey
-            - DeletePolicy
-            - DeletePolicyVersion
-            - DeleteRolePolicy
-            - DeleteUserPolicy
-            - DetachGroupPolicy
-            - DetachRolePolicy
-            - DetachUserPolicy
-            - PutGroupPolicy
-            - PutRolePolicy
-            - PutUserPolicy
-      State: ENABLED
-      Targets:
-      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
-        Id: TargetFunctionV1       
+      Principal: events.amazonaws.com     
   CloudTrailCloudWatchEventRule:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: CloudtrailChange
@@ -338,6 +170,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1
   DetectS3BucketPolicyChanges:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: S3BucketPolicyChanges
@@ -363,6 +196,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1        
   EC2InstanceStatechangeCloudWatchEventRule:
+    Condition: Events 
     Type: AWS::Events::Rule
     Properties:
       Name: EC2statechange
@@ -377,6 +211,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1
   CMKdeletecloudwatcheventrule:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: KMSDeleteordisable
@@ -395,6 +230,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1    
   DetectConfigChanges:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: ConfigServiceChanges
@@ -415,6 +251,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1
   ConfigRulesComplianceChangeCloudWatchEventRule:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: ConfigRulesComplianceChanges
@@ -429,6 +266,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1        
   SecurityGroupChangesCloudWatchEventRule:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: SecurityGroupChanges
@@ -451,6 +289,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1
   NetworkAclChangesCloudWatchEventRule:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: NetworkAclChanges
@@ -473,6 +312,7 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1
   NetworkChangeCloudWatchEventRule:
+    Condition: Events
     Type: AWS::Events::Rule
     Properties:
       Name: NetworkChangeEvents
@@ -534,52 +374,6 @@ Resources:
             Principal:
               Service:
                 - config.amazonaws.com
-  ConfigServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: AWSConfigServiceRole
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - config.amazonaws.com
-          Action:
-          - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSConfigRole
-      Policies:
-      - PolicyName: CIS-configservice-policy
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-          - Sid: AWSConfigRole
-            Effect: Allow
-            Action:
-            - config:Put*
-            Resource: '*'
-          - Sid: AWSCloudTrailConfig
-            Effect: Allow
-            Action:
-            - cloudtrail:List*
-            - cloudtrail:Desc*
-            - cloudtrail:Look*
-            - cloudtrail:Get*
-            Resource: '*'
-          - Sid: AWSConfigPutObject
-            Effect: Allow
-            Action: s3:PutObject
-            Resource:
-            - !Join ['', ['arn:aws:s3:::','config-bucket12-',!Ref 'MasterAccountNo',/*]]
-            Condition:
-              StringEquals:
-                s3:x-amz-acl: bucket-owner-full-control
-          - Sid: AWSConfigGetObject
-            Effect: Allow
-            Action: s3:GetBucketAcl
-            Resource:
-            - !Join ['', ['arn:aws:s3:::',config-bucket12-, !Ref 'MasterAccountNo']]
   ConfigServiceSNS:
     Condition: ConfigSubcription
     Type: AWS::SNS::Subscription
@@ -589,11 +383,9 @@ Resources:
         TopicArn: !Ref 'ConfigTopic'
   ConfigRecorder:
     Type: AWS::Config::ConfigurationRecorder
-    DependsOn: 
-    - ConfigServiceRole
     Properties:
       Name: myconfigservice-recorder
-      RoleARN: !GetAtt  ConfigServiceRole.Arn
+      RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSConfigServiceRole"
       RecordingGroup:
         AllSupported: true
         IncludeGlobalResourceTypes: true

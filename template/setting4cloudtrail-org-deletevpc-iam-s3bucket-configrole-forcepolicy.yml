@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: 2010-09-09
-Description: "This Cloudformation will delete VPC and update IAM password policy"
+Description: "This Cloudformation will delete VPC, update IAM password policy, Restrict s3 bucket public access, Update Cloudtrail to Master. This need to execute in All Account than delete stack"
 Mappings:
     AWSRegionAMIEC2:
         ap-northeast-1:
@@ -138,7 +138,7 @@ Resources:
             Tags: 
               - 
                 Key: "Name"
-                Value: "demo-vpc"
+                Value: "securityenable"
 
     publicroutetable:
         Type: "AWS::EC2::RouteTable"

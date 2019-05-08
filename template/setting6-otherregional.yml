@@ -9,16 +9,11 @@ Metadata:
       Parameters:
       - MasterAccountNo
     - Label:
-        default: 'Cloudwatch'
+        default: 'Cloudwatch Alerts'
       Parameters:
       - Cloudwatchalertconfigure
       - PrimaryEmailCloudwatchalarm
       - SecondaryEmailCloudwatchalarm
-    - Label:
-        default: 'Config Service'
-      Parameters:
-      - DeliveryFrequency
-      - PrimaryEmailConfigservice
     ParameterLabels:
       MasterAccountNo:
         default: Master Account No
@@ -27,11 +22,7 @@ Metadata:
       PrimaryEmailCloudwatchalarm:
         default: Primary Email Address for Cloudwatch Alerts(Required only if you want alert)
       SecondaryEmailCloudwatchalarm:
-        default: Secondary Email Address for Cloudwatch Alerts
-      DeliveryFrequency:
-        default: Config Service Snapshot Delivery Frequency
-      PrimaryEmailConfigservice:
-        default: Email Address for Config Service Notification        
+        default: Secondary Email Address for Cloudwatch Alerts      
 Parameters:
   MasterAccountNo:
     Description: 'Master AWS Account No'
@@ -57,24 +48,8 @@ Parameters:
     AllowedPattern: ".+@.+"
     Default: 'example2@example.com'
     Description: "'Optional'Triggered alarms will alert to this email address. Verification required and you can opt-out later. Make sure to validate otherwise you won't be able to delete the subscription and have to wait 3 days for automatic deletion."
-  DeliveryFrequency:
-    Type: String
-    Default: Six_Hours
-    Description: "'Optional' The frequency with which AWS Config delivers configuration snapshots."
-    AllowedValues:
-      - One_Hour
-      - Three_Hours
-      - Six_Hours
-      - Twelve_Hours
-      - TwentyFour_Hours
-  PrimaryEmailConfigservice:
-    Type: String
-    AllowedPattern: ".+@.+"
-    Default: 'example@example.com'
-    Description: "'Optional' Enter the email address you want to notify  stream change and notifications. ' this can cause a high volume of email.'"
 Conditions:
   SecondarySubcription: !Not [!Equals [!Ref SecondaryEmailCloudwatchalarm, 'example2@example.com']]
-  ConfigSubcription: !Not [!Equals [!Ref PrimaryEmailConfigservice, 'example@example.com']]
   Events: !Not [!Equals [!Ref Cloudwatchalertconfigure, 'No']]
   eventsecondarysub: !And 
     - !Condition SecondarySubcription
@@ -84,7 +59,7 @@ Resources:
     Condition: Events
     Type: AWS::SNS::Topic
     Properties:
-      DisplayName: !Sub "Notify Cloudwatch Alerts ${AWS::AccountId}"
+      DisplayName: !Sub "Notify Alerts (Cloudtrail/Guardduty/Securityhub/Cloudwatch) ${AWS::AccountId}"
       TopicName: CW-Notifications
       Subscription:
       - Endpoint:
@@ -374,13 +349,6 @@ Resources:
             Principal:
               Service:
                 - config.amazonaws.com
-  ConfigServiceSNS:
-    Condition: ConfigSubcription
-    Type: AWS::SNS::Subscription
-    Properties:
-        Endpoint: !Ref PrimaryEmailConfigservice
-        Protocol: email
-        TopicArn: !Ref 'ConfigTopic'
   ConfigRecorder:
     Type: AWS::Config::ConfigurationRecorder
     Properties:
@@ -396,6 +364,6 @@ Resources:
     Properties:
       Name: myconfigservice-deliverychannel
       ConfigSnapshotDeliveryProperties:
-        DeliveryFrequency: !Ref DeliveryFrequency
-      S3BucketName: !Join ['', ['config-bucket12-',!Ref MasterAccountNo]]
+        DeliveryFrequency: Six_Hours
+      S3BucketName: !Join ['', ['config-bucket-',!Ref MasterAccountNo]]
       SnsTopicARN: !Ref ConfigTopic        

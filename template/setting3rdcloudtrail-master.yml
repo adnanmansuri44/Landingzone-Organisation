@@ -1,40 +1,13 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Create Cloudtrail in Master Account'     
+Description: 'Create Cloudtrail in Master Account. This Cloudformation must be execute in Master Account'     
 Parameters:
-  CloudtrailName:
-    Description: 'Name of Cloudtrail'
-    Type: String
-    Default: 'Master-Trail-DO_NOT_MODIFY'
-    MinLength: '0'
-    MaxLength: '64'
-    AllowedPattern: "^(|[|\\w=,.@-]+)$"
-    ConstraintDescription: "'Optional'The trailname must contain only upper and lowercase alphanumeric characters with no spaces. These characters are alllowed: = , . @ -" 
-  TrailBucket:
-    Default: cloudtrail-bucket12-MasterAccountNo
-    Type: String
-    Description: Enter the Cloudtrail bucket Name created in log account
   logaccountno:
     Description: 'Log AWS Account No'
     Type: Number
     MinValue: 000000000001
     MaxValue: 999999999999
-    ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901"   
-  CloudwatchLogGroupName:
-    Description: '"Optional" Name of Cloudwatch Log Group'
-    Type: String
-    Default: 'CloudTrail/DefaultLogGroup'
-    MinLength: '0'
-    MaxLength: '512'
-    AllowedPattern: "[\\w-/.]+"
-    ConstraintDescription: "Log group names can be between 1 and 512 characters long. Allowed characters include a-z, A-Z, 0-9, '_' (underscore), '-' (hyphen), '/' (forward slash), and '.' (period)."
-  CloudWatchLogsRetentionInDays:
-    Description: '"Optional" The number of days log events are kept in CloudWatch Logs'
-    Type: Number
-    Default: 90
-    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
-Conditions:
-  bucketnameverify: !Equals [!Ref TrailBucket, 'cloudtrail-bucket12-MasterAccountNo']
+    ConstraintDescription: "Enter Log Account No Only Ex:- 012345678901"   
 Resources:
 #---------------------------------------
 #CloudTrail Configuration
@@ -42,8 +15,8 @@ Resources:
   TrailLogGroup:
     Type: 'AWS::Logs::LogGroup'
     Properties:
-      LogGroupName: !Ref CloudwatchLogGroupName
-      RetentionInDays: !Ref CloudWatchLogsRetentionInDays
+      LogGroupName: CloudTrail/DefaultLogGroup
+      RetentionInDays: 90
   TrailLogGroupRole:
     DependsOn: TrailLogGroup
     Type: 'AWS::IAM::Role'
@@ -95,9 +68,8 @@ Resources:
     - TrailLogGroupRole
     Type: 'AWS::CloudTrail::Trail'
     Properties:
-      TrailName: !Ref CloudtrailName
-      #S3BucketName: !Ref TrailBucket
-      S3BucketName: !If [bucketnameverify, !Sub 'cloudtrail-bucket12-${AWS::AccountId}', !Ref TrailBucket]
+      TrailName: Master-Trail-DO_NOT_MODIFY
+      S3BucketName: !Sub 'cloudtrail-bucket-${AWS::AccountId}'
       IncludeGlobalServiceEvents: true
       IsLogging: true
       IsMultiRegionTrail: true
@@ -115,7 +87,6 @@ Resources:
                 Type: 'AWS::Lambda::Function'
                 Values:
                     -   'arn:aws:lambda'
-      #KMSKeyId: !Ref myKMSKey
       KMSKeyId: 
         !Sub 
             - "arn:aws:kms:${AWS::Region}:${logaccount}:alias/Trail-Log-Encryption"

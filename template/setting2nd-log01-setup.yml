@@ -61,7 +61,7 @@ Resources:
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: Retain
     Properties:
-        BucketName: !Sub "s3access-logs12-${MasterAccountNo}"
+        BucketName: !Sub "s3access-logs-${MasterAccountNo}"
         AccessControl: LogDeliveryWrite
         LifecycleConfiguration:
             Rules:
@@ -109,7 +109,7 @@ Resources:
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: Retain
     Properties:
-        BucketName: !Sub "cloudtrail-bucket12-${MasterAccountNo}"
+        BucketName: !Sub "cloudtrail-bucket-${MasterAccountNo}"
         AccessControl: Private
         VersioningConfiguration:
             Status: Enabled        
@@ -170,7 +170,7 @@ Resources:
     DeletionPolicy: Retain
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "config-bucket12-${MasterAccountNo}"
+      BucketName: !Sub "config-bucket-${MasterAccountNo}"
       AccessControl: Private
       VersioningConfiguration:
         Status: Enabled    

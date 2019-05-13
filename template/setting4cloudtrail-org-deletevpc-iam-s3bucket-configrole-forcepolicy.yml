@@ -34,7 +34,17 @@ Mappings:
         us-west-1:
             AMZLN: ami-0ec6517f6edbf8044
         us-west-2:
-            AMZLN: ami-01e24be29428c15b2            
+            AMZLN: ami-01e24be29428c15b2  
+Parameters:
+    MasterAccountNo:
+        Description: 'Master AWS Account No'
+        Type: Number
+        MinValue: 000000000001
+        MaxValue: 999999999999
+        ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901" 
+Conditions:
+    mastoraccount: !Equals [!Ref MasterAccountNo, !Ref 'AWS::AccountId']   
+    notmastoraccount: !Not [!Equals [!Ref MasterAccountNo, !Ref 'AWS::AccountId']]
 Resources:
     forceiampolicy: 
       Type: AWS::IAM::ManagedPolicy
@@ -202,6 +212,7 @@ Resources:
                 - Ref: iam6e6cd98
 
     myec2instance:   
+        Condition: notmastoraccount
         Type: "AWS::EC2::Instance"
         Properties:
             ImageId: !FindInMap 
@@ -222,8 +233,46 @@ Resources:
                     yum update -y
                     pip install awscli --upgrade --user
                     yum install git jq -y
+                    cd /root
+                    git clone https://github.com/adnanmansuri44/remove-default-vpc.git
+                    sh remove-default-vpc/remove_vpc.sh
+                    aws iam  update-account-password-policy --minimum-password-length 14 --require-symbols --require-numbers --require-uppercase-characters --require-lowercase-characters --allow-users-to-change-password --max-password-age 90 --password-reuse-prevention 24 --hard-expiry
+                    aws s3control put-public-access-block --account-id '${AWS::AccountId}' --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" --region '${AWS::Region}'
+    masterec2instance:
+        Condition: mastoraccount
+        Type: "AWS::EC2::Instance"
+        Properties:
+            ImageId: !FindInMap 
+                - AWSRegionAMIEC2
+                - !Ref 'AWS::Region'
+                - AMZLN
+            InstanceType: "t2.micro"
+            IamInstanceProfile: !Ref iamb15974e
+            SubnetId: 
+                Ref: publicsubnet
+            Tags: 
+            -   Key: "Name"
+                Value: "Prerequistic-setup"
+            UserData:
+              Fn::Base64:
+                !Sub |
+                    #!/bin/bash                  
+                    yum update -y
+                    pip install awscli --upgrade --user
+                    yum install git jq python2-pip python2 -y
+                    pip install boto3
+                    cd /root
                     git clone https://github.com/adnanmansuri44/remove-default-vpc.git
                     sh remove-default-vpc/remove_vpc.sh
                     sh remove-default-vpc/cloudtrailmaster.sh
                     aws iam  update-account-password-policy --minimum-password-length 14 --require-symbols --require-numbers --require-uppercase-characters --require-lowercase-characters --allow-users-to-change-password --max-password-age 90 --password-reuse-prevention 24 --hard-expiry
                     aws s3control put-public-access-block --account-id '${AWS::AccountId}' --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" --region '${AWS::Region}'
+                    git clone https://github.com/aws-samples/amazon-guardduty-multiaccount-scripts.git
+                    git clone https://github.com/awslabs/aws-securityhub-multiaccount-scripts.git
+                    aws organizations list-accounts --output text --query 'Accounts[?Status==`ACTIVE`][JoinedTimestamp,Id,Email]' | sort | cut -f2- | tail -n +2 | sed -e 's/\s/,/g' > awsaccount.csv
+                    cp awsaccount.csv amazon-guardduty-multiaccount-scripts/
+                    cp awsaccount.csv aws-securityhub-multiaccount-scripts/
+                    cd amazon-guardduty-multiaccount-scripts/
+                    python enableguardduty.py --master_account '${AWS::AccountId}' --assume_role OrganizationAccountAccessRole --enabled_regions '${AWS::Region}' ./awsaccount.csv
+                    cd ../aws-securityhub-multiaccount-scripts/
+                    python enablesecurityhub.py --master_account '${AWS::AccountId}' --assume_role OrganizationAccountAccessRole --enabled_regions '${AWS::Region}' ./awsaccount.csv                    

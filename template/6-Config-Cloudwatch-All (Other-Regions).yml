@@ -79,6 +79,7 @@ Resources:
     - AlarmNotificationTopic
     Properties:
       FunctionName: FormatCloudWatchEvent
+      Description: SNS message forwarding function for notifications.      
       Code:
         ZipFile: !Sub |
           #==================================================================================================
@@ -121,7 +122,12 @@ Resources:
     Properties:
       FunctionName: !GetAtt FunctionToFormatCloudWatchEvent.Arn
       Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com     
+      Principal: events.amazonaws.com
+  ForwardSnsNotificationGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionToFormatCloudWatchEvent}'
+      RetentionInDays: 14            
   CloudTrailCloudWatchEventRule:
     Condition: Events
     Type: AWS::Events::Rule

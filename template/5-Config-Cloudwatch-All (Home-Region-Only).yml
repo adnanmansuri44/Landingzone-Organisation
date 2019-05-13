@@ -89,6 +89,7 @@ Resources:
     - AlarmNotificationTopic
     Properties:
       FunctionName: FormatCloudWatchEvent
+      Description: SNS message forwarding function for notifications.          
       Code:
         ZipFile: !Sub |
           #==================================================================================================
@@ -131,6 +132,11 @@ Resources:
       FunctionName: !GetAtt FunctionToFormatCloudWatchEvent.Arn
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
+  ForwardSnsNotificationGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionToFormatCloudWatchEvent}'
+      RetentionInDays: 14      
   ConsoleSignInFailuresMetricFilter:
     Condition: mastoraccount
     Type: AWS::Logs::MetricFilter
@@ -186,7 +192,7 @@ Resources:
       Period: '60'
       TreatMissingData: notBreaching
       Statistic: Sum
-      Threshold: '1'
+      Threshold: '3'
   ConsoleSignInWithoutMfaMetricFilter:
     Condition: mastoraccount
     Type: AWS::Logs::MetricFilter
@@ -608,6 +614,25 @@ Resources:
       Statistic: Sum
       Threshold: '1'
       TreatMissingData: notBreaching      
+  Consoleloginfailed:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ConsoleLoginFailed
+      Description: Publishes formatted Console Login Failed events to an SNS topic
+      EventPattern:
+        Source: 
+        - aws.signin
+        detail-type:
+        - AWS Console Sign In via CloudTrail
+        detail:
+          eventName:
+            - ConsoleLogin
+          errorMessage:
+            - "Failed authentication"
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
   Consoleloginwithoutmfa:
     Type: AWS::Events::Rule
     Properties:

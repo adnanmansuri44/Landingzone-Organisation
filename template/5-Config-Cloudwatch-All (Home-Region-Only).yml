@@ -42,6 +42,108 @@ Conditions:
   mastoraccount: !Equals [!Ref MasterAccountNo, !Ref 'AWS::AccountId']
   SecondarySubcription: !Not [!Equals [!Ref SecondaryEmailCloudwatchalarm, 'example2@example.com']]
 Resources:
+  iammfagroup:
+      DeletionPolicy: Retain
+      Type: AWS::IAM::Group
+      Properties:
+          GroupName : Force_MFA_Group
+  forceiampolicy:
+      DependsOn: iammfagroup
+      Type: AWS::IAM::ManagedPolicy
+      DeletionPolicy: Retain
+      Properties: 
+          ManagedPolicyName: "Force_MFA"
+          Description: "This policy will force iam user to create MFA first. Without MFA user can not perform any operations."
+          PolicyDocument: 
+              Version: "2012-10-17"
+              Statement: 
+              - 
+                  Sid: "AllowViewAccountInfo"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:GetAccountPasswordPolicy"
+                  - "iam:GetAccountSummary"
+                  - "iam:ListVirtualMFADevices"
+                  Resource: "*"
+              - 
+                  Sid: "AllowManageOwnPasswords"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:ChangePassword"
+                  - "iam:GetUser"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"             
+              - 
+                  Sid: "AllowManageOwnAccessKeys"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:CreateAccessKey"
+                  - "iam:DeleteAccessKey"
+                  - "iam:ListAccessKeys"
+                  - "iam:UpdateAccessKey"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"
+              - 
+                  Sid: "AllowManageOwnSigningCertificates"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:DeleteSigningCertificate"
+                  - "iam:ListSigningCertificates"
+                  - "iam:UpdateSigningCertificate"
+                  - "iam:UploadSigningCertificate"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"       
+              - 
+                  Sid: "AllowManageOwnSSHPublicKeys"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:DeleteSSHPublicKey"
+                  - "iam:GetSSHPublicKey"
+                  - "iam:ListSSHPublicKeys"
+                  - "iam:UpdateSSHPublicKey"
+                  - "iam:UploadSSHPublicKey"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"         
+              - 
+                  Sid: "AllowManageOwnGitCredentials"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:CreateServiceSpecificCredential"
+                  - "iam:DeleteServiceSpecificCredential"
+                  - "iam:ListServiceSpecificCredentials"
+                  - "iam:ResetServiceSpecificCredential"
+                  - "iam:UpdateServiceSpecificCredential"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"       
+              - 
+                  Sid: "AllowManageOwnVirtualMFADevice"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:CreateVirtualMFADevice"
+                  - "iam:DeleteVirtualMFADevice"
+                  Resource: "arn:aws:iam::*:mfa/${aws:username}"
+              - 
+                  Sid: "AllowManageOwnUserMFA"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:DeactivateMFADevice"
+                  - "iam:EnableMFADevice"
+                  - "iam:ListMFADevices"
+                  - "iam:ResyncMFADevice"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"
+              - 
+                  Sid: "DenyAllExceptListedIfNoMFA"
+                  Effect: "Deny"
+                  NotAction: 
+                  - "iam:CreateVirtualMFADevice"
+                  - "iam:EnableMFADevice"
+                  - "iam:GetUser"
+                  - "iam:ListMFADevices"
+                  - "iam:ListVirtualMFADevices"
+                  - "iam:ResyncMFADevice"
+                  - "sts:GetSessionToken"
+                  Resource: "*"
+                  Condition: 
+                      BoolIfExists: 
+                          aws:MultiFactorAuthPresent: "false"
+          Groups:
+              - "Force_MFA_Group"                      
+  
   AlarmNotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -613,7 +715,40 @@ Resources:
       Period: '60'
       Statistic: Sum
       Threshold: '1'
-      TreatMissingData: notBreaching      
+      TreatMissingData: notBreaching 
+  rootactivitymonitor:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: rootusagemonitor
+      Description: Publishes formatted root account usage events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        - AWS Console Sign In via CloudTrail
+        detail:
+          userIdentity:
+            type:
+              - Root
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1      
+  unauthorizedoperation:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: authorizationfailed
+      Description: Publishes formatted Unauthorized events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS Console Sign In via CloudTrail
+        detail:
+          errorMessage:
+            - "AccessDenied"
+            - "Client.UnauthorizedOperation"
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
   Consoleloginfailed:
     Type: AWS::Events::Rule
     Properties:

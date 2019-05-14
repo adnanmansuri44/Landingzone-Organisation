@@ -46,4 +46,4 @@ Resources:
                 Effect: "Allow"
                 Action:
                   - sts:AssumeRole
-                Resource: *            
+                Resource: "*"            

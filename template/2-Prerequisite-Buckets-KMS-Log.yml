@@ -115,7 +115,7 @@ Resources:
             Status: Enabled        
         LoggingConfiguration:
             DestinationBucketName: !Ref LoggingBucket
-            LogFilePrefix: !Sub "cloudtrail-bucket-${MasterAccountNo}"
+            LogFilePrefix: !Sub "cloudtrail-bucket-${MasterAccountNo}/"
         PublicAccessBlockConfiguration:
             BlockPublicAcls: true
             BlockPublicPolicy: true
@@ -180,7 +180,7 @@ Resources:
             SSEAlgorithm: AES256
       LoggingConfiguration:
         DestinationBucketName: !Ref LoggingBucket
-        LogFilePrefix: !Sub "config-bucket-${MasterAccountNo}"
+        LogFilePrefix: !Sub "config-bucket-${MasterAccountNo}/"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true

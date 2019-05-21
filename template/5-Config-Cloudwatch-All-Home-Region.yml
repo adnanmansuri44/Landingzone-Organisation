@@ -697,7 +697,6 @@ Resources:
       - MetricNamespace: CloudTrailMetrics
         MetricName: S3BucketPolicyEventCount
         MetricValue: '1'
-        TreatMissingData: notBreaching
   S3BucketPolicyChangesAlarm:
     Condition: mastoraccount    
     DependsOn:

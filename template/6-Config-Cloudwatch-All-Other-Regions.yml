@@ -128,6 +128,39 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${FunctionToFormatCloudWatchEvent}'
       RetentionInDays: 14            
+  rootactivitymonitor:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: rootusagemonitor
+      Description: Publishes formatted root account usage events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        - AWS Console Sign In via CloudTrail
+        detail:
+          userIdentity:
+            type:
+              - Root
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1      
+  unauthorizedoperation:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: authorizationfailed
+      Description: Publishes formatted Unauthorized events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS Console Sign In via CloudTrail
+        detail:
+          errorMessage:
+            - "AccessDenied"
+            - "Client.UnauthorizedOperation"
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
   CloudTrailCloudWatchEventRule:
     Condition: Events
     Type: AWS::Events::Rule
@@ -362,7 +395,7 @@ Resources:
       RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSConfigServiceRole"
       RecordingGroup:
         AllSupported: true
-        IncludeGlobalResourceTypes: true
+        IncludeGlobalResourceTypes: false
   ConfigDeliveryChannel:
     Type: AWS::Config::DeliveryChannel
     DependsOn:

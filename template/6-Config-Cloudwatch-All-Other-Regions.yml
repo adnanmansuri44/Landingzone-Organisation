@@ -50,7 +50,7 @@ Parameters:
     Description: "'Optional'Triggered alarms will alert to this email address. Verification required and you can opt-out later. Make sure to validate otherwise you won't be able to delete the subscription and have to wait 3 days for automatic deletion."
 Conditions:
   SecondarySubcription: !Not [!Equals [!Ref SecondaryEmailCloudwatchalarm, 'example2@example.com']]
-  Events: !Not [!Equals [!Ref Cloudwatchalertconfigure, 'No']]
+  Events: !Equals [!Ref Cloudwatchalertconfigure, 'Yes']
   eventsecondarysub: !And 
     - !Condition SecondarySubcription
     - !Condition Events   
@@ -124,11 +124,15 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
   ForwardSnsNotificationGroup:
+    Condition: Events
     Type: 'AWS::Logs::LogGroup'
     Properties:
       LogGroupName: !Sub '/aws/lambda/${FunctionToFormatCloudWatchEvent}'
       RetentionInDays: 14            
   rootactivitymonitor:
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent  
+    Condition: Events    
     Type: AWS::Events::Rule
     Properties:
       Name: rootusagemonitor
@@ -146,6 +150,9 @@ Resources:
       - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
         Id: TargetFunctionV1      
   unauthorizedoperation:
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent  
+    Condition: Events   
     Type: AWS::Events::Rule
     Properties:
       Name: authorizationfailed
@@ -163,6 +170,8 @@ Resources:
         Id: TargetFunctionV1
   CloudTrailCloudWatchEventRule:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent  
     Type: AWS::Events::Rule
     Properties:
       Name: CloudtrailChange
@@ -185,6 +194,8 @@ Resources:
         Id: TargetFunctionV1
   DetectS3BucketPolicyChanges:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: S3BucketPolicyChanges
@@ -211,6 +222,8 @@ Resources:
         Id: TargetFunctionV1        
   EC2InstanceStatechangeCloudWatchEventRule:
     Condition: Events 
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: EC2statechange
@@ -226,6 +239,8 @@ Resources:
         Id: TargetFunctionV1
   CMKdeletecloudwatcheventrule:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: KMSDeleteordisable
@@ -245,6 +260,8 @@ Resources:
         Id: TargetFunctionV1    
   DetectConfigChanges:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: ConfigServiceChanges
@@ -266,6 +283,8 @@ Resources:
         Id: TargetFunctionV1
   ConfigRulesComplianceChangeCloudWatchEventRule:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: ConfigRulesComplianceChanges
@@ -281,6 +300,8 @@ Resources:
         Id: TargetFunctionV1        
   SecurityGroupChangesCloudWatchEventRule:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: SecurityGroupChanges
@@ -304,6 +325,8 @@ Resources:
         Id: TargetFunctionV1
   NetworkAclChangesCloudWatchEventRule:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: NetworkAclChanges
@@ -327,6 +350,8 @@ Resources:
         Id: TargetFunctionV1
   NetworkChangeCloudWatchEventRule:
     Condition: Events
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent    
     Type: AWS::Events::Rule
     Properties:
       Name: NetworkChangeEvents

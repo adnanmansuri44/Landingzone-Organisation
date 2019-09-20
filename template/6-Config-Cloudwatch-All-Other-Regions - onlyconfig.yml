@@ -1,0 +1,59 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "This Cloudformation will enable config, cloudwatch events in other region."
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'AccountDetail'
+      Parameters:
+      - MasterAccountNo
+    ParameterLabels:
+      MasterAccountNo:
+        default: Master Account No   
+Parameters:
+  MasterAccountNo:
+    Description: 'Master AWS Account No'
+    Type: Number
+    MinValue: 000000000001
+    MaxValue: 999999999999
+    ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901"  
+Resources:    
+  ConfigTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: Config-Service
+      DisplayName: !Sub 'AWS Config Topic ${AWS::AccountId}'
+  ConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref ConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: AWSConfigSNSPolicy
+            Action:
+              - sns:Publish
+            Effect: Allow
+            Resource: !Ref ConfigTopic
+            Principal:
+              Service:
+                - config.amazonaws.com
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      Name: myconfigservice-recorder
+      RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSConfigServiceRole"
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: false
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    DependsOn:
+    - ConfigTopic
+    Properties:
+      Name: myconfigservice-deliverychannel
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: Six_Hours
+      S3BucketName: !Join ['', ['config-bucket-',!Ref MasterAccountNo]]
+      SnsTopicARN: !Ref ConfigTopic        

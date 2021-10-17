@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Create a role for support access policy
+Parameters:
+  MasterAccountId:
+    Description: 'Master AWS Account No'
+    Type: Number
+    MinValue: 000000000001
+    MaxValue: 999999999999
+    ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901"   
+Resources:
+  AWSSupportAccess:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: AWSSupportAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+                AWS:
+                - !Join ['', ['arn:aws:iam::', !Ref 'MasterAccountId',':root']]
+            Action:
+            - sts:AssumeRole
+      Path: /            
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSSupportAccess

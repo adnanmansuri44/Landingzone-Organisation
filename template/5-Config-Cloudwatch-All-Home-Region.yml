@@ -1,90 +1,1171 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: ""
-Parameters: 
-  emailgdalerts:
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "This Cloudformation will enable config, cloudwatch events and Alarms. Create Alarms only in Master Account. it needs to execute in all account"
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Masterdetail'
+      Parameters:
+      - MasterAccountNo
+    - Label:
+        default: 'Cloudwatch alerts'
+      Parameters:
+      - PrimaryEmailCloudwatchalarm
+      - SecondaryEmailCloudwatchalarm
+    ParameterLabels:
+      MasterAccountNo:
+        default: Master Account No
+      PrimaryEmailCloudwatchalarm:
+        default: Primary Email Address for Cloudwatch Alerts(Required)
+      SecondaryEmailCloudwatchalarm:
+        default: Secondary Email Address for Cloudwatch Alerts    
+Parameters:
+  MasterAccountNo:
+    Description: 'Master AWS Account No'
+    Type: Number
+    MinValue: 000000000001
+    MaxValue: 999999999999
+    ConstraintDescription: "Enter Master Account No Only Ex:- 012345678901"
+  PrimaryEmailCloudwatchalarm:
     Type: String
     AllowedPattern: ".+@.+"
     Default: 'example@example.com'
-    Description: "Triggered to alert to this email address. Verification required and you can opt-out later. Make sure to validate otherwise you won't be able to delete the subscription and have to wait 3 days for automatic deletion."
+    Description: "'Required'Triggered alarms will alert to this email address. Verification required and you can opt-out later. Make sure to validate otherwise you won't be able to delete the subscription and have to wait 3 days for automatic deletion."
+  SecondaryEmailCloudwatchalarm:
+    Type: String
+    Description: 'Optional Secondary Email id.'
+    AllowedPattern: ".+@.+"
+    Default: 'example2@example.com'
+    Description: "'Optional'Triggered alarms will alert to this email address. Verification required and you can opt-out later. Make sure to validate otherwise you won't be able to delete the subscription and have to wait 3 days for automatic deletion."       
+Conditions:
+  mastoraccount: !Equals [!Ref MasterAccountNo, !Ref 'AWS::AccountId']
+  SecondarySubcription: !Not [!Equals [!Ref SecondaryEmailCloudwatchalarm, 'example2@example.com']]
 Resources:
-  EventRule:
-    Type: "AWS::Events::Rule"
+  iammfagroup:
+      DeletionPolicy: Retain
+      Type: AWS::IAM::Group
+      Properties:
+          GroupName : Force_MFA_Group
+  forceiampolicy:
+      DependsOn: iammfagroup
+      Type: AWS::IAM::ManagedPolicy
+      DeletionPolicy: Retain
+      Properties: 
+          ManagedPolicyName: "Force_MFA"
+          Description: "This policy will force iam user to create MFA first. Without MFA user can not perform any operations."
+          PolicyDocument: 
+              Version: "2012-10-17"
+              Statement: 
+              - 
+                  Sid: "AllowViewAccountInfo"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:GetAccountPasswordPolicy"
+                  - "iam:GetAccountSummary"
+                  - "iam:ListVirtualMFADevices"
+                  Resource: "*"
+              - 
+                  Sid: "AllowManageOwnPasswords"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:ChangePassword"
+                  - "iam:GetUser"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"             
+              - 
+                  Sid: "AllowManageOwnAccessKeys"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:CreateAccessKey"
+                  - "iam:DeleteAccessKey"
+                  - "iam:ListAccessKeys"
+                  - "iam:UpdateAccessKey"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"
+              - 
+                  Sid: "AllowManageOwnSigningCertificates"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:DeleteSigningCertificate"
+                  - "iam:ListSigningCertificates"
+                  - "iam:UpdateSigningCertificate"
+                  - "iam:UploadSigningCertificate"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"       
+              - 
+                  Sid: "AllowManageOwnSSHPublicKeys"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:DeleteSSHPublicKey"
+                  - "iam:GetSSHPublicKey"
+                  - "iam:ListSSHPublicKeys"
+                  - "iam:UpdateSSHPublicKey"
+                  - "iam:UploadSSHPublicKey"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"         
+              - 
+                  Sid: "AllowManageOwnGitCredentials"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:CreateServiceSpecificCredential"
+                  - "iam:DeleteServiceSpecificCredential"
+                  - "iam:ListServiceSpecificCredentials"
+                  - "iam:ResetServiceSpecificCredential"
+                  - "iam:UpdateServiceSpecificCredential"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"       
+              - 
+                  Sid: "AllowManageOwnVirtualMFADevice"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:CreateVirtualMFADevice"
+                  - "iam:DeleteVirtualMFADevice"
+                  Resource: "arn:aws:iam::*:mfa/${aws:username}"
+              - 
+                  Sid: "AllowManageOwnUserMFA"
+                  Effect: "Allow"
+                  Action: 
+                  - "iam:DeactivateMFADevice"
+                  - "iam:EnableMFADevice"
+                  - "iam:ListMFADevices"
+                  - "iam:ResyncMFADevice"
+                  Resource: "arn:aws:iam::*:user/${aws:username}"
+              - 
+                  Sid: "DenyAllExceptListedIfNoMFA"
+                  Effect: "Deny"
+                  NotAction: 
+                  - "iam:CreateVirtualMFADevice"
+                  - "iam:EnableMFADevice"
+                  - "iam:GetUser"
+                  - "iam:ListMFADevices"
+                  - "iam:ListVirtualMFADevices"
+                  - "iam:ResyncMFADevice"
+                  - "sts:GetSessionToken"
+                  Resource: "*"
+                  Condition: 
+                      BoolIfExists: 
+                          aws:MultiFactorAuthPresent: "false"
+          Groups:
+              - "Force_MFA_Group"                      
+  
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
     Properties:
-      Name: "detect-guardduty-finding"
-      Description: "A CloudWatch Event Rule that triggers on Amazon GuardDuty findings. The Event Rule can be used to trigger notifications or remediative actions using AWS Lambda."
-      State: "ENABLED"
-      Targets:
-        - Arn:
-            Ref: "SnsTopicEventRule"
-          Id: "target-id1"
+      DisplayName: !Sub "Notify Alerts (Cloudtrail/Guardduty/Securityhub/Cloudwatch) ${AWS::AccountId}"
+      TopicName: CW-Notifications
+      Subscription:
+      - Endpoint:
+          Ref: PrimaryEmailCloudwatchalarm
+        Protocol: email
+  SecondaryNotificationsub:
+    Condition: SecondarySubcription
+    Type: AWS::SNS::Subscription
+    Properties:
+        Endpoint: !Ref SecondaryEmailCloudwatchalarm
+        Protocol: email
+        TopicArn: !Ref 'AlarmNotificationTopic'
+  RoleForCloudWatchEvents:
+    Type: AWS::IAM::Role
+    DependsOn: AlarmNotificationTopic
+    Properties:
+      RoleName: Lambda-CW-Events-SNS
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: CIS-AllowSnsPublish
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: "*"
+  FunctionToFormatCloudWatchEvent:
+    Type: AWS::Lambda::Function
+    DependsOn:
+    - RoleForCloudWatchEvents
+    - AlarmNotificationTopic
+    Properties:
+      FunctionName: FormatCloudWatchEvent
+      Description: SNS message forwarding function for notifications.          
+      Code:
+        ZipFile: !Sub |
+          #==================================================================================================
+          # Function: process-cloudwatch-event
+          # Purpose:  Processes CloudWatch Event before publishing to SNS.
+          #==================================================================================================
+          import boto3
+          import json
+          SNS_TOPIC_ARN = '${AlarmNotificationTopic}'
+          #==================================================================================================
+          # Function handler
+          #==================================================================================================
+          def lambda_handler(event, context):
+            source = event['source']
+            if source == 'aws.config':
+              response = boto3.client('sns').publish(
+                TopicArn = SNS_TOPIC_ARN,
+                Message = json.dumps(event, indent=4),
+                Subject = 'NOTIFICATION {0} : {1}'.format(event['detail-type'], event['detail']['configRuleName']),
+                MessageStructure = 'raw'
+              )
+            else:
+              response = boto3.client('sns').publish(
+                TopicArn = SNS_TOPIC_ARN,
+                Message = json.dumps(event, indent=4),
+                Subject = 'NOTIFICATION {0}:{1}'.format(event['detail']['eventSource'], event['detail']['eventName']),
+                MessageStructure = 'raw'
+              )
+      Description: Formats a given CloudWatch Event to be published to an SNS topic
+      Handler: index.lambda_handler
+      MemorySize: 1024
+      Role: !GetAtt RoleForCloudWatchEvents.Arn
+      Runtime: python2.7
+      Timeout: 5
+  LambdaPermissionForCloudTrailCloudWatchEventRules:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+    - FunctionToFormatCloudWatchEvent
+    Properties:
+      FunctionName: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  ForwardSnsNotificationGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionToFormatCloudWatchEvent}'
+      RetentionInDays: 14      
+  ConsoleSignInFailuresMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: '{ ($.eventName = ConsoleLogin) && ($.errorMessage = "Failed authentication") }'
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: ConsoleSignInFailureCount
+        MetricValue: '1'
+  ConsoleSignInFailuresAlarm:
+    Condition: mastoraccount
+    DependsOn:
+    - ConsoleSignInFailuresMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CloudTrailConsoleSignInFailures
+      AlarmDescription: Alarms when an unauthenticated API call is made to sign into the console.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: ConsoleSignInFailureCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '3'
+      TreatMissingData: notBreaching
+  AuthorizationFailuresMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: '{ ($.errorCode = "*UnauthorizedOperation") || ($.errorCode = "AccessDenied*") }'
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: AuthorizationFailureCount
+        MetricValue: '1'
+  AuthorizationFailuresAlarm:
+    Condition: mastoraccount
+    DependsOn:
+    - AuthorizationFailuresMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CloudTrailAuthorizationFailures
+      AlarmDescription: Alarms when an unauthorized API call is made.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: AuthorizationFailureCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      TreatMissingData: notBreaching
+      Statistic: Sum
+      Threshold: '3'
+  ConsoleSignInWithoutMfaMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: '{ $.eventName = "ConsoleLogin" && $.additionalEventData.MFAUsed = "No" }'
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: ConsoleSignInWithoutMfaEventCount
+        MetricValue: '1'
+  ConsoleSignInWithoutMFAAlarm:
+    Condition: mastoraccount
+    DependsOn:
+    - ConsoleSignInWithoutMfaMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ConsoleSignInWithoutMFA
+      AlarmDescription: Alarm for Management Console Sign-in without MFA.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: ConsoleSignInWithoutMfaEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching      
+  RootuserIdentityusageMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: '{ $.userIdentity.type = "Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != "AwsServiceEvent" }'
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: RootAccountUsageEventCount
+        MetricValue: '1'
+  RootAccountUsageAlarm:
+    Condition: mastoraccount
+    DependsOn:
+    - RootuserIdentityusageMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: RootAccountUsage
+      AlarmDescription: Alarm for Usage of "root" Account.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: RootAccountUsageEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  organisationchangeMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: '{ ($.eventSource = organizations.amazonaws.com) && ($.eventName = AcceptHandshake) || ($.eventName = AttachPolicy) || ($.eventName = CancelHandshake) || ($.eventName = CreateAccount) || ($.eventName = CreateOrganization) || ($.eventName = CreateOrganizationalUnit) || ($.eventName = CreatePolicy) || ($.eventName = DeclineHandshake) || ($.eventName = DeleteOrganization) || ($.eventName = DeleteOrganizationalUnit) || ($.eventName = DeletePolicy) || ($.eventName = EnableAllFeatures) || ($.eventName = EnablePolicyType) || ($.eventName = InviteAccountToOrganization) || ($.eventName = LeaveOrganization) || ($.eventName = DetachPolicy) || ($.eventName = DisablePolicyType) || ($.eventName = MoveAccount) || ($.eventName = RemoveAccountFromOrganization) || ($.eventName = UpdateOrganizationalUnit) || ($.eventName = UpdatePolicy) }'
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: OrganizationsChanges
+        MetricValue: '1'
+  organisationchangealarm:
+    Condition: mastoraccount
+    DependsOn:
+    - organisationchangeMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: Organizationchange
+      AlarmDescription: Alarm detect change in organization .
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: OrganizationsChanges
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching      
+  SecurityGroupChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = AuthorizeSecurityGroupIngress) || ($.eventName = AuthorizeSecurityGroupEgress) || ($.eventName = RevokeSecurityGroupIngress) || ($.eventName = RevokeSecurityGroupEgress) || ($.eventName = CreateSecurityGroup) || ($.eventName = DeleteSecurityGroup) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: SecurityGroupEventCount
+        MetricValue: '1'
+  SecurityGroupChangesAlarm:
+    Condition: mastoraccount
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: SecurityGroupChanges
+      AlarmDescription: Alarms when an API call is made to create, update or delete a Security Group.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: SecurityGroupEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  NetworkAclChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = CreateNetworkAcl) || ($.eventName = CreateNetworkAclEntry) || ($.eventName = DeleteNetworkAcl) || ($.eventName = DeleteNetworkAclEntry) || ($.eventName = ReplaceNetworkAclEntry) || ($.eventName = ReplaceNetworkAclAssociation) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: NetworkAclEventCount
+        MetricValue: '1'
+  NetworkAclChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: NetworkAclChanges
+      AlarmDescription: Alarms when an API call is made to create, update or delete a Network ACL.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: NetworkAclEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  NetworkGatewayChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = CreateCustomerGateway) || ($.eventName = DeleteCustomerGateway) || ($.eventName = AttachInternetGateway) || ($.eventName = CreateInternetGateway) || ($.eventName = DeleteInternetGateway) || ($.eventName = DetachInternetGateway) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: GatewayEventCount
+        MetricValue: '1'
+  GatewayChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: NetworkGatewayChanges
+      AlarmDescription: Alarms when an API call is made to create, update or delete a Customer or Internet Gateway.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: GatewayEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  VpcChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = CreateVpc) || ($.eventName = DeleteVpc) || ($.eventName = ModifyVpcAttribute) || ($.eventName = AcceptVpcPeeringConnection) || ($.eventName = CreateVpcPeeringConnection) || ($.eventName = DeleteVpcPeeringConnection) || ($.eventName = RejectVpcPeeringConnection) || ($.eventName = AttachClassicLinkVpc) || ($.eventName = DetachClassicLinkVpc) || ($.eventName = DisableVpcClassicLink) || ($.eventName = EnableVpcClassicLink) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: VpcEventCount
+        MetricValue: '1'
+  VpcChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: VpcChanges
+      AlarmDescription: Alarms when an API call is made to create, update or delete a VPC, VPC peering connection or VPC connection to classic.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: VpcEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  EC2InstanceChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = RunInstances) || ($.eventName = RebootInstances) || ($.eventName = StartInstances) || ($.eventName = StopInstances) || ($.eventName = TerminateInstances) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: EC2InstanceEventCount
+        MetricValue: '1'
+  EC2InstanceChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: EC2InstanceChanges
+      AlarmDescription: Alarms when an API call is made to create, terminate, start,stop or reboot an EC2 instance.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: EC2InstanceEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  EC2LargeInstanceChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = RunInstances) && (($.requestParameters.instanceType = *.8xlarge) || ($.requestParameters.instanceType = *.4xlarge)) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: EC2LargeInstanceEventCount
+        MetricValue: '1'
+  EC2LargeInstanceChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CloudTrailEC2LargeInstanceChanges
+      AlarmDescription: Alarms when an API call is made to create, terminate, start, stop or reboot a 4x or 8x-large EC2 instance.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: EC2LargeInstanceEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  CloudTrailChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = CreateTrail) || ($.eventName = UpdateTrail) || ($.eventName = DeleteTrail) || ($.eventName = StartLogging) || ($.eventName = StopLogging) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: CloudTrailEventCount
+        MetricValue: '1'
+  CloudTrailChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CloudTrailChanges
+      AlarmDescription: Alarms when an API call is made to create, update or delete a CloudTrail trail, or to start or stop logging to a trail.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: CloudTrailEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  IAMPolicyChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{($.eventName=DeleteGroupPolicy)||($.eventName=DeleteRolePolicy)||($.eventName=DeleteUserPolicy)||($.eventName=PutGroupPolicy)||($.eventName=PutRolePolicy)||($.eventName=PutUserPolicy)||($.eventName=CreatePolicy)||($.eventName=DeletePolicy)||($.eventName=CreatePolicyVersion)||($.eventName=DeletePolicyVersion)||($.eventName=AttachRolePolicy)||($.eventName=DetachRolePolicy)||($.eventName=AttachUserPolicy)||($.eventName=DetachUserPolicy)||($.eventName=AttachGroupPolicy)||($.eventName=DetachGroupPolicy)}"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: IAMPolicyEventCount
+        MetricValue: '1'
+  IAMPolicyChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CloudTrailIAMPolicyChanges
+      AlarmDescription: Alarms when an API call is made to change an IAM policy.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: IAMPolicyEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  ConfigserviceChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: '{($.eventSource = config.amazonaws.com) && (($.eventName=StopConfigurationRecorder)||($.eventName=DeleteDeliveryChannel)||($.eventName=PutDeliveryChannel)||($.eventName=PutConfigurationRecorder))}'
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: ConfigServiceChangescount
+        MetricValue: '1'
+  ConfigServiceChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ConfigServiceChanges
+      AlarmDescription: Alarm for AWS Config Configuration Changes.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: ConfigServiceChangescount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  DisabledOrDeletedCmksMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{($.eventSource = kms.amazonaws.com) && (($.eventName=DisableKey)||($.eventName=ScheduleKeyDeletion))}"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: DisableorDeletedCmkEventCount
+        MetricValue: '1'
+  DisableordeleteofCMKsAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: DisableordeleteofCMKs
+      AlarmDescription: Alarm for Disabling or Scheduled Deletion of Customer Created CMKs.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: DisableorDeletedCmkEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  RouteTableConfigChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventName = CreateRoute) || ($.eventName = CreateRouteTable) || ($.eventName = ReplaceRoute) || ($.eventName = ReplaceRouteTableAssociation) || ($.eventName = DeleteRouteTable) || ($.eventName = DeleteRoute) || ($.eventName = DisassociateRouteTable) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: RouteTableEventCount
+        MetricValue: '1'
+  RouteTableChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: RouteTableChanges
+      AlarmDescription: Alarm for Route Table Changes.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: RouteTableEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching
+  S3BucketPolicyChangesMetricFilter:
+    Condition: mastoraccount
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: 'CloudTrail/DefaultLogGroup'
+      FilterPattern: "{ ($.eventSource = s3.amazonaws.com) && (($.eventName = PutBucketAcl) || ($.eventName = PutBucketPolicy) || ($.eventName = PutBucketCors) || ($.eventName = PutBucketLifecycle) || ($.eventName = PutBucketReplication) || ($.eventName = DeleteBucketPolicy) || ($.eventName = DeleteBucketCors) || ($.eventName = DeleteBucketLifecycle) || ($.eventName = DeleteBucketReplication)) }"
+      MetricTransformations:
+      - MetricNamespace: CloudTrailMetrics
+        MetricName: S3BucketPolicyEventCount
+        MetricValue: '1'
+  S3BucketPolicyChangesAlarm:
+    Condition: mastoraccount    
+    DependsOn:
+    - SecurityGroupChangesMetricFilter
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: S3BucketPolicyChanges
+      AlarmDescription: Alarm for S3 Bucket Policy Changes.
+      AlarmActions:
+      - Ref: AlarmNotificationTopic
+      MetricName: S3BucketPolicyEventCount
+      Namespace: CloudTrailMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: '1'
+      Period: '60'
+      Statistic: Sum
+      Threshold: '1'
+      TreatMissingData: notBreaching 
+  rootactivitymonitor:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: rootusagemonitor
+      Description: Publishes formatted root account usage events to an SNS topic
       EventPattern:
         detail-type:
-          - "GuardDuty Finding"
-        source:
-          - "aws.guardduty"
+        - AWS API Call via CloudTrail
+        - AWS Console Sign In via CloudTrail
         detail:
-          severity:
-            - 7
-            - 7.0
-            - 7.1
-            - 7.2
-            - 7.3
-            - 7.4
-            - 7.5
-            - 7.6
-            - 7.7
-            - 7.8
-            - 7.9
-            - 8
-            - 8.0
-            - 8.1
-            - 8.2
-            - 8.3
-            - 8.4
-            - 8.5
-            - 8.6
-            - 8.7
-            - 8.8
-            - 8.9
-  SnsTopicEventRule:
-    Type: "AWS::SNS::Topic"
+          userIdentity:
+            type:
+              - Root
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1      
+  unauthorizedoperation:
+    Type: AWS::Events::Rule
     Properties:
-      Subscription:
-        - Endpoint: !Ref emailgdalerts
-          Protocol: "email"
-      TopicName: "event-rule-action"
-      DisplayName: high-gd-alerts
-  SnsTopicPolicyEventRule:
-    Type: "AWS::SNS::TopicPolicy"
+      Name: authorizationfailed
+      Description: Publishes formatted Unauthorized events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS Console Sign In via CloudTrail
+        detail:
+          errorMessage:
+            - "AccessDenied"
+            - "Client.UnauthorizedOperation"
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  Consoleloginfailed:
+    Type: AWS::Events::Rule
     Properties:
-      PolicyDocument:
+      Name: ConsoleLoginFailed
+      Description: Publishes formatted Console Login Failed events to an SNS topic
+      EventPattern:
+        Source: 
+        - aws.signin
+        detail-type:
+        - AWS Console Sign In via CloudTrail
+        detail:
+          eventName:
+            - ConsoleLogin
+          errorMessage:
+            - "Failed authentication"
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  Consoleloginwithoutmfa:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ConsoleLoginNoMFA
+      Description: Publishes formatted Console Login without MFA events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS Console Sign In via CloudTrail
+        detail:
+          eventName:
+            - ConsoleLogin
+        additionalEventData:
+          MFAUsed:
+            - No  
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  IamPolicyChangesCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: IAMPolicychange
+      Description: Publishes formatted IAM policy change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - iam.amazonaws.com
+          eventName:
+            - AttachGroupPolicy
+            - AttachRolePolicy
+            - AttachUserPolicy
+            - CreateAccessKey
+            - CreatePolicy
+            - CreatePolicyVersion
+            - DeleteAccessKey
+            - DeletePolicy
+            - DeletePolicyVersion
+            - DeleteRolePolicy
+            - DeleteUserPolicy
+            - DetachGroupPolicy
+            - DetachRolePolicy
+            - DetachUserPolicy
+            - PutGroupPolicy
+            - PutRolePolicy
+            - PutUserPolicy
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1       
+  CloudTrailCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: CloudtrailChange
+      Description: Publishes formatted CloudTrail change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - cloudtrail.amazonaws.com
+          eventName:
+          - StopLogging
+          - DeleteTrail
+          - UpdateTrail
+          - CreateTrail
+          - StartLogging
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  DetectS3BucketPolicyChanges:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: S3BucketPolicyChanges
+      Description: Publishes formatted S3 bucket policy change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - s3.amazonaws.com
+          eventName:
+          - PutBucketAcl
+          - PutBucketPolicy
+          - PutBucketCors
+          - PutBucketLifecycle
+          - PutBucketReplication
+          - DeleteBucketPolicy
+          - DeleteBucketCors
+          - DeleteBucketLifecycle
+          - DeleteBucketReplication
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1        
+  EC2InstanceStatechangeCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: EC2statechange
+      Description: Publishes formatted EC2 change events to an SNS topic
+      EventPattern:
+        Source: 
+        - aws.ec2      
+        detail-type:
+        - EC2 Instance State-change Notification
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  CMKdeletecloudwatcheventrule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: KMSDeleteordisable
+      Description: Publishes formatted KMS change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - kms.amazonaws.com
+          eventName:
+          - DisableKey
+          - ScheduleKeyDeletion
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1    
+  DetectConfigChanges:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ConfigServiceChanges
+      Description: Publishes formatted Config change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - config.amazonaws.com
+          eventName:
+          - PutConfigurationRecorder
+          - StopConfigurationRecorder
+          - DeleteDeliveryChannel
+          - PutDeliveryChannel
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  ConfigRulesComplianceChangeCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ConfigRulesComplianceChanges
+      Description: Publishes formatted Config Rules Compliance Changes events to an SNS topic
+      EventPattern:
+        detail-type:
+        - Config Rules Compliance Change
+        source:
+        - aws.config
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1        
+  SecurityGroupChangesCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: SecurityGroupChanges
+      Description: Publishes formatted security group change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - ec2.amazonaws.com
+          eventName:
+          - AuthorizeSecurityGroupIngress
+          - AuthorizeSecurityGroupEgress
+          - RevokeSecurityGroupIngress
+          - RevokeSecurityGroupEgress
+          - CreateSecurityGroup
+          - DeleteSecurityGroup
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  NetworkAclChangesCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: NetworkAclChanges
+      Description: Publishes formatted network ACL change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - ec2.amazonaws.com
+          eventName:
+          - CreateNetworkAcl
+          - CreateNetworkAclEntry
+          - DeleteNetworkAcl
+          - DeleteNetworkAclEntry
+          - ReplaceNetworkAclEntry
+          - ReplaceNetworkAclAssociation
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1
+  NetworkChangeCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: NetworkChangeEvents
+      Description: Publishes formatted network change events to an SNS topic
+      EventPattern:
+        detail-type:
+        - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+          - ec2.amazonaws.com
+          eventName:
+          - AcceptVpcPeeringConnection
+          - AttachClassicLinkVpc
+          - AttachInternetGateway
+          - AssociateRouteTable
+          - CreateCustomerGateway
+          - CreateInternetGateway
+          - CreateRoute
+          - CreateRouteTable
+          - CreateVpc
+          - CreateVpcPeeringConnection
+          - DeleteCustomerGateway
+          - DeleteInternetGateway
+          - DeleteRoute
+          - DeleteRouteTable
+          - DeleteDhcpOptions
+          - DeleteVpc
+          - DeleteVpcPeeringConnection
+          - DetachClassicLinkVpc
+          - DetachInternetGateway
+          - DisableVpcClassicLink
+          - DisassociateRouteTable
+          - EnableVpcClassicLink
+          - ModifyVpcAttribute
+          - RejectVpcPeeringConnection
+          - ReplaceRoute
+          - ReplaceRouteTableAssociation
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt FunctionToFormatCloudWatchEvent.Arn
+        Id: TargetFunctionV1     
+  EventsRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Name: Notify-GuardDuty-Event
+      Description: This rule will notify guardduty events and finding to SNS.
+      EventPattern:
+        source:
+          - aws.guardduty
+      State: ENABLED
+      Targets:
+        - Arn: !Ref AlarmNotificationTopic
+          Id: sns
+  SecurityHubFindingsToEmail:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Name: SecurityHubFindingsToEmail
+      Description: 'CloudWatchEvents Rule to enable SecurityHub Findings in email '
+      EventPattern:
+        source:
+          - aws.securityhub
+        resources:
+          - !Join 
+            - ':'
+            - - arn
+              - aws
+              - securityhub
+              - !Ref 'AWS::Region'
+              - !Ref 'AWS::AccountId'
+              - !Join 
+                - /
+                - - action
+                  - custom
+                  - SendToEmail
+      State: ENABLED
+      Targets:
+        - Id: SendFindingsTopic
+          Arn: !Ref AlarmNotificationTopic
+  ConfigServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSConfigServiceRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
         Statement:
-          - Sid: "__default_statement_ID"
-            Effect: "Allow"
-            Principal:
-              AWS: "*"
+        - Effect: Allow
+          Principal:
+            Service:
+            - config.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSConfigRole
+      Policies:
+      - PolicyName: CIS-configservice-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: AWSConfigRole
+            Effect: Allow
             Action:
-              - "SNS:GetTopicAttributes"
-              - "SNS:SetTopicAttributes"
-              - "SNS:AddPermission"
-              - "SNS:RemovePermission"
-              - "SNS:DeleteTopic"
-              - "SNS:Subscribe"
-              - "SNS:ListSubscriptionsByTopic"
-              - "SNS:Publish"
-              - "SNS:Receive"
+            - config:Put*
+            Resource: '*'
+          - Sid: AWSCloudTrailConfig
+            Effect: Allow
+            Action:
+            - cloudtrail:List*
+            - cloudtrail:Desc*
+            - cloudtrail:Look*
+            - cloudtrail:Get*
+            Resource: '*'
+          - Sid: AWSConfigPutObject
+            Effect: Allow
+            Action: s3:PutObject
             Resource:
-              Ref: "SnsTopicEventRule"
+            - !Join ['', ['arn:aws:s3:::','config-bucket-',!Ref 'MasterAccountNo',/*]]
             Condition:
               StringEquals:
-                AWS:SourceOwner:
-                  Ref: "AWS::AccountId"
-          - Sid: "TrustCWEToPublishEventsToMyTopic"
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AWSConfigGetObject
+            Effect: Allow
+            Action: s3:GetBucketAcl
+            Resource:
+            - !Join ['', ['arn:aws:s3:::',config-bucket-, !Ref 'MasterAccountNo']]
+  ConfigTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: Config-Service
+      DisplayName: !Sub 'AWS Config Topic ${AWS::AccountId}'
+  ConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref ConfigTopic
+      PolicyDocument:
+        Statement:
+          - Sid: AWSConfigSNSPolicy
+            Action:
+              - sns:Publish
+            Effect: Allow
+            Resource: !Ref ConfigTopic
+            Principal:
+              Service:
+                - config.amazonaws.com
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    DependsOn: 
+    - ConfigServiceRole
+    Properties:
+      Name: myconfigservice-recorder
+      RoleARN: !GetAtt  ConfigServiceRole.Arn
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    DependsOn:
+    - ConfigTopic
+    Properties:
+      Name: myconfigservice-deliverychannel
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: Six_Hours
+      S3BucketName: !Join ['', ['config-bucket-',!Ref MasterAccountNo]]
+      SnsTopicARN: !Ref ConfigTopic
+  AWSConfigAggregatorRole:
+    Type: AWS::IAM::Role
+    Condition: mastoraccount 
+    DependsOn:
+    - ConfigRecorder
+    Properties:
+      RoleName: AWSConfigAggregatorRole
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSConfigRoleForOrganizations"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
             Effect: "Allow"
             Principal:
-              Service: "events.amazonaws.com"
-            Action: "sns:Publish"
-            Resource:
-              Ref: "SnsTopicEventRule"
-      Topics:
-        - Ref: "SnsTopicEventRule"
+              Service:
+                - "config.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+  GuardrailsComplianceAggregator:
+    Type: AWS::Config::ConfigurationAggregator
+    Condition: mastoraccount    
+    DependsOn: 
+    - AWSConfigAggregatorRole
+    - ConfigDeliveryChannel
+    Properties:
+      OrganizationAggregationSource:
+        RoleArn: !GetAtt AWSConfigAggregatorRole.Arn
+        AllAwsRegions: true
+      ConfigurationAggregatorName: Organization-GuardrailsComplianceAggregator 

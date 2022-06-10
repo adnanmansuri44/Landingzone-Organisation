@@ -1,0 +1,376 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "AWS Organizations CaseCreator is to be deployed on your organization's master payer account. This tool will monitor events that get emitted when a new AWS account joins your organization whether via account invite or direct account creation using master payer account. The solution will periodically scan for any new member accounts that joined the organization and will automatically create a support case requesting to enable Enterprise Support plan on them. It can also be configured to send a customizable notification email to a set address(es) informing the recipient of the above events. **Warning** This template creates two AWS SSM parameters, two CloudWatch Events rules and one Lambda function that you will be charged for depending on function execution frequency and duration. It will in turn depend on how often and how many accounts join as well as how quickly sent invites are accepted. You can partially control the rate using template's CloudWatchInterval parameter.",
+	"Parameters": {
+		"CCs": {
+			"Description": "(Optional)E-mails to CC on created cases. This must be a comma-separated list.",
+			"Type": "String"
+		},
+		"CompanyName": {
+			"Description": "(Required)Your company name. This name will appear in the subject field of support cases opened by Lambda.",
+			"Type": "String"
+		},
+        "CloudWatchIntervalUnit": {
+			"Description": "(Optional)Units used to specify CloudWatchInterval value. Only accepts minutes, hours or days. Default is minutes.",
+			"Type": "String",
+            "Default": "minutes",
+            "AllowedValues": ["minutes", "hours", "days"]
+		},
+		"CloudWatchInterval": {
+			"Description": "(Optional)Defines(in CloudWatchIntervalUnit units) how often Lambda will check for accepted invites. Value can not be 0 or 1. Smaller values may occasionally result in duplicate cases and emails. Default is 15.",
+			"Type": "Number",
+			"Default": 15
+		},
+		"LambdaCodeS3BucketName": {
+			"Description": "(Required)The name of the Amazon S3 bucket where the .zip file that contains Lambda function code is stored. This bucket must reside in the same AWS Region that you're creating the Lambda function in. For example, thisisbucketname",
+			"Type": "String"
+		},
+		"LambdaCodeS3Key": {
+			"Description": "(Required)The location and name of the .zip file that contains your Lambda function source code file named lambda_function.py. For example, somefolder/lambdacode.zip",
+			"Type": "String"
+		},
+		"CloudWatchLogsRetention":{
+			"Description": "(Optional)Defines(in days) the retention period for Lambda execution logs stored in CloudWatch Logs. Used for debugging purposes. Possible values are: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, and 3653. Defaults to 30.",
+			"Type": "Number",
+			"AllowedValues": [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653],
+			"Default": 30
+		},
+		"RequestUpdateToEmail": {
+			"Description": "(Optional)Company E-mail to send account update notification to. E-mail has to be verified with SES. For account information update notifications to work, both RequestUpdateToEmail and RequestUpdateFromEmail must be specified.",
+			"Type": "String"
+		},
+		"RequestUpdateFromEmail": {
+			"Description": "(Optional)Company E-mail the above notification will be sent from. E-mail has to be verified with SES. For notifications to work, both RequestUpdateToEmail and RequestUpdateFromEmail must be specified.",
+			"Type": "String"
+		},
+		"CustomEmailContents": {
+			"Description": "(Optional)If both RequestUpdateToEmail and RequestUpdateFromEmail were specified, you can add a custom message here. By default, we only send a list of account IDs that recently joined the organization.",
+			"Type": "String",
+            "Default": " "
+		}
+	},
+	"Resources": {
+		"NewAccountInOrgFunction": {
+			"Type": "AWS::Lambda::Function",
+			"DependsOn": [
+				"LambdaExecutionRole",
+				"LambdaCloudWatchLogGroup"
+			],
+			"Properties": {
+				"FunctionName": "AWSSupportLambdaCreateCase",
+				"Code": {
+					"S3Bucket": {"Ref":  "LambdaCodeS3BucketName"},
+					"S3Key": {"Ref":  "LambdaCodeS3Key"}
+				},
+				"Role": {
+					"Fn::GetAtt": [
+						"LambdaExecutionRole",
+						"Arn"
+					]
+				},
+				"Environment": {
+					"Variables": {
+						"ccEmailAddresses": {
+							"Ref": "CCs"
+						},
+						"CompanyName": {
+							"Ref": "CompanyName"
+						},
+						"RequestUpdateToEmail": {
+							"Ref": "RequestUpdateToEmail"
+						},
+                        "RequestUpdateFromEmail": {
+							"Ref": "RequestUpdateFromEmail"
+						},
+						"CustomEmailContents": {
+							"Ref": "CustomEmailContents"
+						}
+					}
+				},
+				"Timeout": 60,
+				"Handler": "lambda_function.lambda_handler",
+				"Runtime": "python3.6",
+				"MemorySize": 128,
+				"ReservedConcurrentExecutions": 1
+			}
+		},
+		"LambdaCloudWatchLogGroup": {
+			"Type" : "AWS::Logs::LogGroup",
+			"Properties": {
+				"LogGroupName": "/aws/lambda/AWSSupportLambdaCreateCase",
+				"RetentionInDays": {
+						"Ref": "CloudWatchLogsRetention"
+				}
+			}
+		},
+		"LambdaExecutionRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": [{
+							"Effect": "Allow",
+							"Principal": {
+								"Service": [
+									"lambda.amazonaws.com"
+								]
+							},
+							"Action": [
+								"sts:AssumeRole"
+							]
+						}
+					]
+				},
+				"Path": "/"
+			}
+		},
+		"LambdaExecutionPolicy": {
+			"Type": "AWS::IAM::Policy",
+			"DependsOn": [
+				"PendingInvitesSSMParameter",
+                "CreatedAccountsSSMParameter",
+				"LambdaExecutionRole"
+			],
+			"Properties": {
+				"PolicyName": "LambdaCloudWatchtoSupport",
+				"Roles": [{
+						"Ref": "LambdaExecutionRole"
+					}
+				],
+				"PolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": [{
+							"Effect": "Allow",
+							"Action": [
+								"support:*",
+								"organizations:ListHandshakesForOrganization"
+							],
+							"Resource": "*"
+						}, {
+							"Effect": "Allow",
+							"Action": [
+								"logs:CreateLogGroup",
+								"logs:CreateLogStream",
+								"logs:PutLogEvents"
+							],
+							"Resource": "arn:aws:logs:*:*:*"
+						}, {
+							"Effect": "Allow",
+							"Action": [
+								"ssm:PutParameter",
+								"ssm:GetParameter"
+							],
+							"Resource": {"Fn::Sub": ["arn:aws:ssm:us-east-1:${Account}:parameter/Organizations_Pending_Invites", {"Account": {"Ref": "AWS::AccountId"}}]}
+						},{
+							"Effect": "Allow",
+							"Action": [
+								"ssm:PutParameter",
+								"ssm:GetParameter"
+							],
+							"Resource": {"Fn::Sub": ["arn:aws:ssm:us-east-1:${Account}:parameter/Organizations_Created_Accounts", {"Account": {"Ref": "AWS::AccountId"}}]}
+						}, {
+							"Effect": "Allow",
+							"Action": [
+								"events:DisableRule",
+								"events:EnableRule"
+							],
+							"Resource": {
+								"Fn::GetAtt": [
+									"ScanForAcceptedInvitesRule",
+									"Arn"
+								]
+							}
+						},
+						{
+							"Effect": "Allow",
+							"Action": [
+								"ses:SendEmail",
+								"ses:SendRawEmail"
+							],
+							"Resource": "*",
+							"Condition": {
+								"StringEquals": {
+									"ses:FromAddress": {"Ref" : "RequestUpdateFromEmail" }
+								}
+							}
+						}
+					]
+				}
+			}
+		},
+		"DetectAccountCreationRule": {
+			"Type": "AWS::Events::Rule",
+			"Properties": {
+				"Name": "DetectAccountCreationRule",
+				"Description": "Triggers when a new account is created via AWS Organizations.",
+				"State": "ENABLED",
+				"EventPattern": {
+					"source": [
+						"aws.organizations"
+					],
+					"detail-type": [
+						"AWS Service Event via CloudTrail"
+					],
+					"detail": {
+						"eventSource": [
+							"organizations.amazonaws.com"
+						],
+						"eventName": [
+							"CreateAccountResult"
+						]
+					}
+				},
+				"Targets": [{
+						"Arn": {
+							"Fn::GetAtt": [
+								"NewAccountInOrgFunction",
+								"Arn"
+							]
+						},
+						"Id": "CreateCase"
+					}
+				]
+			}
+		},
+		"DetectAccountInviteRule": {
+			"Type": "AWS::Events::Rule",
+			"Properties": {
+				"Name": "DetectAccountInviteRule",
+				"Description": "Triggers when an account is invited to join an organization.",
+				"State": "ENABLED",
+				"EventPattern": {
+					"source": [
+						"aws.organizations"
+					],
+					"detail-type": [
+						"AWS API Call via CloudTrail"
+					],
+					"detail": {
+						"eventSource": [
+							"organizations.amazonaws.com"
+						],
+						"eventName": [
+							"InviteAccountToOrganization"
+						]
+					}
+				},
+				"Targets": [{
+						"Arn": {
+							"Fn::GetAtt": [
+								"NewAccountInOrgFunction",
+								"Arn"
+							]
+						},
+						"Id": "CreateCase"
+					}
+				]
+			}
+		},
+		"InvokeLambdaPermissionOne": {
+			"Type": "AWS::Lambda::Permission",
+			"Properties": {
+				"Action": "lambda:InvokeFunction",
+				"FunctionName": {
+					"Fn::GetAtt": [
+						"NewAccountInOrgFunction",
+						"Arn"
+					]
+				},
+				"Principal": "events.amazonaws.com",
+				"SourceArn": {
+					"Fn::GetAtt": [
+						"DetectAccountCreationRule",
+						"Arn"
+					]
+				}
+			}
+		},
+		"InvokeLambdaPermissionTwo": {
+			"Type": "AWS::Lambda::Permission",
+			"Properties": {
+				"Action": "lambda:InvokeFunction",
+				"FunctionName": {
+					"Fn::GetAtt": [
+						"NewAccountInOrgFunction",
+						"Arn"
+					]
+				},
+				"Principal": "events.amazonaws.com",
+				"SourceArn": {
+					"Fn::GetAtt": [
+						"DetectAccountInviteRule",
+						"Arn"
+					]
+				}
+			}
+		},
+		"InvokeLambdaPermissionThree": {
+			"Type": "AWS::Lambda::Permission",
+			"Properties": {
+				"Action": "lambda:InvokeFunction",
+				"FunctionName": {
+					"Fn::GetAtt": [
+						"NewAccountInOrgFunction",
+						"Arn"
+					]
+				},
+				"Principal": "events.amazonaws.com",
+				"SourceArn": {
+					"Fn::GetAtt": [
+						"ScanForAcceptedInvitesRule",
+						"Arn"
+					]
+				}
+			}
+		},
+		"PendingInvitesSSMParameter": {
+			"Type": "AWS::SSM::Parameter",
+			"Properties": {
+				"Description": "Stores Organizations pending invitations handshakeIds. Parameter store type StringList cannot be empty, please ignore PlaceholderValue.",
+				"Name": "Organizations_Pending_Invites",
+				"Type": "StringList",
+				"Tier": "Advanced",
+				"Value": "PlaceholderValue"
+			}
+		},
+        "CreatedAccountsSSMParameter": {
+			"Type": "AWS::SSM::Parameter",
+			"Properties": {
+				"Description": "Stores Organizations recently created account IDs. Parameter store type StringList cannot be empty, please ignore PlaceholderValue.",
+				"Name": "Organizations_Created_Accounts",
+				"Type": "StringList",
+				"Tier": "Advanced",
+				"Value": "PlaceholderValue"
+			}
+		},
+		"ScanForAcceptedInvitesRule": {
+			"Type": "AWS::Events::Rule",
+			"Properties": {
+				"Name": "ScanForAcceptedInvitesRule",
+				"Description": "This will trigger Lambda periodically to make it check for accepted AWS Organizations invitations that still require a support case to be created. Will only be enabled if there is at least one pending invitation.",
+				"State": "DISABLED",
+				"ScheduleExpression": {
+					"Fn::Sub": ["rate(${Interval} ${Units})", {
+							"Interval": {
+								"Ref": "CloudWatchInterval"
+							},
+                            "Units": {
+                                "Ref": "CloudWatchIntervalUnit"
+                            }
+						}
+					]
+				},
+				"Targets": [{
+						"Arn": {
+							"Fn::GetAtt": [
+								"NewAccountInOrgFunction",
+								"Arn"
+							]
+						},
+						"Id": "CreateCase"
+					}
+				]
+			}
+		}
+	}
+}
